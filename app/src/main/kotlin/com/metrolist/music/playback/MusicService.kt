@@ -2841,7 +2841,13 @@ private fun handleTruncatedStream(mediaId: String): Boolean {
             }
         }
         if (events.containsAny(EVENT_TIMELINE_CHANGED, EVENT_POSITION_DISCONTINUITY)) {
-            currentMediaMetadata.value = player.currentMetadata
+    currentMediaMetadata.value = player.currentMetadata
+
+    if (events.contains(EVENT_TIMELINE_CHANGED)) {
+        player.currentMediaItem?.mediaId?.let { mediaId ->
+            checkForTruncatedTimeline(mediaId)
+        }
+    }
         }
 
         if (events.containsAny(Player.EVENT_IS_PLAYING_CHANGED)) {
