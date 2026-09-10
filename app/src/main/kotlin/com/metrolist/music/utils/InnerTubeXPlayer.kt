@@ -74,18 +74,48 @@ object InnerTubeXPlayer {
                     allowBoundedRange = allowBoundedRange,
                 )
             val excludedClients = failedStreamClients(videoId)
-            val stream =
-                requireNotNull(
-                    bundle().extractor.extract(
-                        videoId = videoId,
-                        hints = hints,
-                        excludedClients = excludedClients,
-                        audioQuality = audioQuality.toInnerTubeX(connectivityManager),
-                        clientPlaybackNonce = generateClientPlaybackNonce(),
-                    ),
-                ) { "InnerTubeX returned no playable stream" }
-            check(stream.sabrBootstrap == null) { "SABR is not supported by this playback engine" }
-            Result.success(stream.toPlaybackData())
+val extractor = bundle().extractor
+val audioQualityInnerTubeX =
+    audioQuality.toInnerTubeX(connectivityManager)
+
+val stream =
+    try {
+        extractor.extract(
+            videoId = videoId,
+            hints = hints,
+            excludedClients = excludedClients,
+            audioQuality = audioQualityInnerTubeX,
+            clientPlaybackNonce = generateClientPlaybackNonce(),
+        )
+    } catch (error: StreamResolveException) {
+        if (excludedClients.isNotEmpty()) {
+            Timber.tag(TAG).w(
+                "No playable stream with excluded clients for $videoId. " +
+                    "Retrying without exclusions."
+            )
+
+            extractor.extract(
+                videoId = videoId,
+                hints = hints,
+                excludedClients = emptySet(),
+                audioQuality = audioQualityInnerTubeX,
+                clientPlaybackNonce = generateClientPlaybackNonce(),
+            )
+        } else {
+            throw error
+        }
+    }
+
+val nonNullStream =
+    requireNotNull(stream) {
+        "InnerTubeX returned no playable stream"
+    }
+
+check(nonNullStream.sabrBootstrap == null) {
+    "SABR is not supported by this playback engine"
+}
+
+Result.success(nonNullStream.toPlaybackData())
         } catch (error: CancellationException) {
             throw error
         } catch (error: StreamResolveException) {
