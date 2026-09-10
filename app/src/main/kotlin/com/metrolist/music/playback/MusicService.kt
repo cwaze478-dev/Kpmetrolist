@@ -2591,15 +2591,97 @@ class MusicService :
         }
     }
 
+    private fun isSuspiciouslyShortPlayback(mediaId: String): Boolean {
+    val expectedDurationSec = currentSong.value?.song?.duration ?: return false
+    val actualDurationMs = player.duration
+
+    if (expectedDurationSec < 30 || actualDurationMs <= 0L) {
+        return false
+    }
+
+    val expectedDurationMs = expectedDurationSec * 1000L
+
+    return actualDurationMs <= 15_000L &&
+        actualDurationMs * 2 < expectedDurationMs
+}
+
+private fun handleTruncatedStream(mediaId: String): Boolean {
+    if (!isSuspiciouslyShortPlayback(mediaId)) {
+        return false
+    }
+
+    if (hasExceededRetryLimit(mediaId)) {
+        Timber.tag(TAG).w(
+            "Truncated stream retry limit reached for $mediaId"
+        )
+        return false
+    }
+
+    val failedStreamClient = songUrlCache.clientName(mediaId)
+    val retryIndex = player.currentMediaItemIndex
+    val shouldResume = player.playWhenReady
+
+    incrementRetryCount(mediaId)
+    performAggressiveCacheClear(mediaId)
+
+    failedStreamClient?.let {
+        InnerTubeXPlayer.markStreamClientFailed(mediaId, it)
+    }
+
+    Timber.tag(TAG).w(
+        "Detected suspiciously short playback for $mediaId: " +
+            "expected=${currentSong.value?.song?.duration}s, " +
+            "actual=${player.duration}ms, " +
+            "client=$failedStreamClient. Refreshing stream."
+    )
+
+    retryJob?.cancel()
+    retryJob =
+        scope.launch {
+            delay(RETRY_DELAY_MS)
+
+            if (player.currentMediaItem?.mediaId != mediaId) {
+                return@launch
+            }
+
+            if (retryIndex == C.INDEX_UNSET) {
+                return@launch
+            }
+
+            player.seekTo(retryIndex, 0)
+            player.prepare()
+
+            if (shouldResume &&
+                castConnectionHandler?.isCasting?.value != true
+            ) {
+                player.play()
+            }
+
+            Timber.tag(TAG).d(
+                "Retrying truncated stream for $mediaId from position 0"
+            )
+        }
+
+    return true
+}
+
     override fun onPlaybackStateChanged(
         @Player.State playbackState: Int,
     ) {
         updateInitialBufferRecovery(playbackState)
 
-        if (playbackState == Player.STATE_ENDED) {
-            player.currentMediaItem?.mediaId?.let { mediaId ->
-                scope.launch(Dispatchers.IO) { markCachedIfFullyDownloaded(mediaId) }
-            }
+    if (playbackState == Player.STATE_ENDED) {
+    val mediaId = player.currentMediaItem?.mediaId
+
+    if (mediaId != null && handleTruncatedStream(mediaId)) {
+        return
+    }
+
+    mediaId?.let { id ->
+        scope.launch(Dispatchers.IO) {
+            markCachedIfFullyDownloaded(id)
+        }
+    }
 
             // Check sleep timer guard - don't autoplay/repeat if sleep timer will pause
             val timer = sleepTimer ?: return
@@ -2607,7 +2689,7 @@ class MusicService :
                 return
             }
 
-            val repeatMode = player.repeatMode
+   ך         val repeatMode = player.repeatMode
 
             if (player.playWhenReady && repeatMode == REPEAT_MODE_ALL && player.mediaItemCount > 0) {
                 player.seekTo(0, 0)
