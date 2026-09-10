@@ -2818,7 +2818,78 @@ private fun handleTruncatedStream(mediaId: String): Boolean {
                 )
             }
     }
+private fun checkForTruncatedTimeline(mediaId: String) {
+    scope.launch {
+        delay(300)
 
+        if (player.currentMediaItem?.mediaId != mediaId) {
+            return@launch
+        }
+
+        val expectedDurationSec =
+            withContext(Dispatchers.IO) {
+                database.song(mediaId).first()?.song?.duration
+            } ?: return@launch
+
+        val actualDurationMs = player.duration
+
+        if (expectedDurationSec < 30 ||
+            actualDurationMs <= 0L ||
+            actualDurationMs > 15_000L ||
+            actualDurationMs * 2 >= expectedDurationSec * 1000L
+        ) {
+            if (actualDurationMs > 15_000L) {
+                truncatedStreamRetryCount.remove(mediaId)
+            }
+            return@launch
+        }
+
+        val retries = truncatedStreamRetryCount[mediaId] ?: 0
+
+        if (retries >= MAX_RETRY_PER_SONG) {
+            Timber.tag(TAG).w(
+                "Truncated stream retry limit reached for $mediaId"
+            )
+            return@launch
+        }
+
+        truncatedStreamRetryCount[mediaId] = retries + 1
+
+        val failedStreamClient = songUrlCache.clientName(mediaId)
+
+        Timber.tag(TAG).w(
+            "Timeline duration is suspiciously short: " +
+                "expected=${expectedDurationSec}s " +
+                "actual=${actualDurationMs}ms " +
+                "retry=${retries + 1}/$MAX_RETRY_PER_SONG " +
+                "client=$failedStreamClient"
+        )
+
+        performAggressiveCacheClear(mediaId)
+
+        failedStreamClient?.let {
+            InnerTubeXPlayer.markStreamClientFailed(mediaId, it)
+        }
+
+        retryJob?.cancel()
+        retryJob = launch {
+            delay(RETRY_DELAY_MS)
+
+            if (player.currentMediaItem?.mediaId != mediaId) {
+                return@launch
+            }
+
+            player.seekTo(player.currentMediaItemIndex, 0)
+            player.prepare()
+
+            if (player.playWhenReady &&
+                castConnectionHandler?.isCasting?.value != true
+            ) {
+                player.play()
+            }
+        }
+    }
+}
     override fun onEvents(
         player: Player,
         events: Player.Events,
