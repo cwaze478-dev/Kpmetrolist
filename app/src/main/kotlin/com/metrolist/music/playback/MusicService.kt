@@ -2689,7 +2689,7 @@ private fun handleTruncatedStream(mediaId: String): Boolean {
                 return
             }
 
-   ך         val repeatMode = player.repeatMode
+            val repeatMode = player.repeatMode
 
             if (player.playWhenReady && repeatMode == REPEAT_MODE_ALL && player.mediaItemCount > 0) {
                 player.seekTo(0, 0)
