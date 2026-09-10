@@ -546,6 +546,7 @@ class MusicService :
 
     // Track failed songs to prevent infinite retry loops
     private val recentlyFailedSongs = mutableSetOf<String>()
+    private val truncatedStreamRetryCount = mutableMapOf<String, Int>()
     private var failedSongsClearJob: Job? = null
 
     var castConnectionHandler: CastConnectionHandler? = null
